@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>챗봇 대화</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+  background: #F5F0EB;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 16px;
+}
+.wrap { width: 100%; max-width: 500px; }
+.token-bar {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 12px; padding: 0 4px;
+}
+.token-label { font-size: 12px; color: #777; }
+.token-dots { display: flex; gap: 4px; flex-wrap: wrap; }
+.tok { width: 12px; height: 12px; border-radius: 50%; background: #d8cfc4; }
+.tok.on { background: #6B8E7F; }
+.chat-header {
+  display: flex; align-items: center; gap: 6px; padding: 12px 16px;
+  background: #fff; border-radius: 16px 16px 0 0; border-bottom: 1px solid #f0f0f0;
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; background: #ddd; }
+.chat-title { font-size: 13px; font-weight: 600; margin-left: 6px; color: #444; }
+.chat-body {
+  background: #fff; padding: 16px; min-height: 380px; max-height: 380px;
+  overflow-y: auto; display: flex; flex-direction: column; gap: 12px;
+}
+.mrow { display: flex; flex-direction: column; }
+.mrow.user { align-items: flex-end; }
+.mrow.bot { align-items: flex-start; }
+.spk { font-size: 11px; color: #aaa; margin-bottom: 3px; }
+.bubble {
+  max-width: 82%; padding: 9px 13px; border-radius: 14px;
+  font-size: 13px; line-height: 1.65; word-break: keep-all;
+}
+.bubble.user { background: #ECE6DF; color: #222; border-bottom-right-radius: 4px; }
+.bubble.bot { background: #EAF1ED; color: #1f3a30; border-bottom-left-radius: 4px; }
+.bubble.typing { opacity: 0.5; }
+.chat-input-row {
+  display: flex; gap: 8px; padding: 12px 14px; background: #fff;
+  border-top: 1px solid #f0f0f0; border-radius: 0 0 16px 16px;
+}
+.chat-input {
+  flex: 1; border: 1px solid #e0e0e0; border-radius: 20px;
+  padding: 9px 14px; font-size: 13px; font-family: inherit;
+  outline: none; background: #fafafa;
+}
+.chat-input:focus { border-color: #aaa; background: #fff; }
+.send-btn {
+  padding: 9px 18px; border-radius: 20px; border: none;
+  font-size: 13px; font-family: inherit; font-weight: 600;
+  cursor: pointer; background: #6B8E7F; color: #fff;
+}
+.send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.done-box {
+  margin-top: 16px; padding: 20px; background: #fff;
+  border-radius: 16px; text-align: center; display: none;
+}
+.done-box.show { display: block; }
+.done-box h3 { font-size: 15px; color: #333; margin-bottom: 10px; }
+.done-box p { font-size: 13px; color: #666; margin-bottom: 14px; line-height: 1.6; }
+.code {
+  font-size: 22px; font-weight: 700; letter-spacing: 2px;
+  color: #6B8E7F; background: #EAF1ED; padding: 12px;
+  border-radius: 10px; margin-bottom: 6px;
+}
+.err { color: #c0392b; font-size: 12px; text-align: center; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="token-bar">
+    <span class="token-label">남은 메시지</span>
+    <div class="token-dots" id="tokens"></div>
+  </div>
+  <div class="chat-header">
+    <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+    <span class="chat-title">챗봇</span>
+  </div>
+  <div class="chat-body" id="cbody"></div>
+  <div class="chat-input-row">
+    <input class="chat-input" id="inp" type="text" placeholder="메시지를 입력하세요..."
+      onkeydown="if(event.key==='Enter'&&!event.isComposing)send()" />
+    <button class="send-btn" id="sbtn" onclick="send()">전송</button>
+  </div>
+  <div class="err" id="err"></div>
+
+  <div class="done-box" id="done">
+    <h3>대화가 종료되었습니다</h3>
+    <p>아래 완료 코드를 설문에 입력해 주세요.</p>
+    <div class="code" id="code">—</div>
+  </div>
+</div>
+
+<script>
+// ── 조건 배정: URL 파라미터 ?c=m (미러링) 또는 ?c=n (비미러링) ──
+const params = new URLSearchParams(window.location.search);
+const cond = params.get('c') === 'n' ? 'n' : 'm';  // 기본값 미러링
+
+const TOTAL_TOKENS = 12;
+let tokensLeft = TOTAL_TOKENS;
+let hist = [];
+let loading = false;
+
+const PROMPTS = {
+  m: `당신은 정서적 지지를 제공하는 한국어 챗봇입니다. 반드시 아래 미러링 규칙을 따르세요.
+
+[미러링 필수 규칙 - 절대 어기지 말 것]
+1. 종결어미: 사용자가 "~해요/~어요/~죠" 쓰면 당신도 반드시 그 어미 사용. 반말("~해/~야/~당") 쓰면 반드시 반말로 응답.
+2. 어휘: 사용자가 쓴 단어("진짜","너무","완전","넘" 등)를 그대로 사용. 격식체 어휘("매우","상당히") 금지.
+3. 감탄사: 사용자가 ㅠㅠ,ㅋㅋ,ㅎㅎ 쓰면 유사한 표현 반드시 포함.
+4. 절대 금지: "합니다/입니다/십니까/주시겠습니까" 등 격식체 종결어미 사용 금지.
+
+응답은 2~3문장으로 짧게. 공감과 경청 중심.`,
+  n: `당신은 정서적 지지를 제공하는 한국어 챗봇입니다. 반드시 아래 격식체 규칙을 따르세요.
+
+[격식체 필수 규칙 - 절대 어기지 말 것]
+1. 종결어미: 항상 "~합니다/~입니다/~하십니까/~주시겠습니까"만 사용. 사용자 말투와 무관하게 유지.
+2. 어휘: "진짜/너무/완전/넘" 같은 구어체 절대 금지. "매우/상당히/다소" 사용.
+3. 감탄사 절대 금지: ㅠㅠ,ㅋㅋ,ㅎㅎ,이모지 금지.
+4. 절대 금지: "~해요/~어요/~죠/~야/~해/~당" 같은 비격식체 사용 금지.
+
+응답은 2~3문장으로 짧게. 공감과 경청 중심.`
+};
+
+const WELCOME = {
+  m: '안녕하세요! 요즘 어떻게 지내고 계세요? 편하게 이야기 나눠봐요 :)',
+  n: '안녕하십니까. 최근 어떻게 지내고 계신지 말씀해 주시겠습니까?'
+};
+
+function renderTokens() {
+  const c = document.getElementById('tokens');
+  c.innerHTML = '';
+  for (let i = 0; i < TOTAL_TOKENS; i++) {
+    const d = document.createElement('div');
+    d.className = 'tok' + (i < tokensLeft ? ' on' : '');
+    c.appendChild(d);
+  }
+}
+
+function addMsg(role, text) {
+  const body = document.getElementById('cbody');
+  const row = document.createElement('div');
+  row.className = 'mrow ' + role;
+  const spk = document.createElement('span');
+  spk.className = 'spk';
+  spk.textContent = role === 'user' ? '나' : '챗봇';
+  const b = document.createElement('div');
+  b.className = 'bubble ' + (role === 'user' ? 'user' : 'bot');
+  b.textContent = text;
+  row.appendChild(spk); row.appendChild(b);
+  body.appendChild(row);
+  body.scrollTop = body.scrollHeight;
+}
+
+async function send() {
+  if (loading || tokensLeft <= 0) return;
+  const inp = document.getElementById('inp');
+  const text = inp.value.trim();
+  if (!text) return;
+
+  loading = true;
+  inp.value = '';
+  document.getElementById('sbtn').disabled = true;
+  document.getElementById('err').textContent = '';
+
+  addMsg('user', text);
+  hist.push({ role: 'user', content: text });
+
+  // 토큰 차감
+  tokensLeft--;
+  renderTokens();
+
+  // typing
+  const body = document.getElementById('cbody');
+  const tr = document.createElement('div');
+  tr.className = 'mrow bot'; tr.id = 'typing';
+  const ts = document.createElement('span'); ts.className = 'spk'; ts.textContent = '챗봇';
+  const tb = document.createElement('div'); tb.className = 'bubble bot typing'; tb.textContent = '...';
+  tr.appendChild(ts); tr.appendChild(tb);
+  body.appendChild(tr); body.scrollTop = body.scrollHeight;
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ system: PROMPTS[cond], messages: hist })
+    });
+    const data = await res.json();
+    document.getElementById('typing')?.remove();
+
+    if (data.reply) {
+      hist.push({ role: 'assistant', content: data.reply });
+      addMsg('bot', data.reply);
+    } else {
+      document.getElementById('err').textContent = '응답 오류가 발생했습니다. 다시 시도해 주세요.';
+      tokensLeft++; renderTokens();  // 실패 시 토큰 복구
+    }
+  } catch (e) {
+    document.getElementById('typing')?.remove();
+    document.getElementById('err').textContent = '네트워크 오류가 발생했습니다.';
+    tokensLeft++; renderTokens();
+  }
+
+  loading = false;
+
+  // 토큰 소진 → 종료
+  if (tokensLeft <= 0) {
+    endConversation();
+  } else {
+    document.getElementById('sbtn').disabled = false;
+    inp.focus();
+  }
+}
+
+function endConversation() {
+  document.getElementById('inp').disabled = true;
+  document.getElementById('sbtn').disabled = true;
+  document.getElementById('inp').placeholder = '대화가 종료되었습니다';
+
+  // completion code 생성: 조건 + 랜덤
+  const rand = Math.random().toString(36).substring(2, 8).toUpperCase();
+  const code = (cond === 'm' ? 'MIR-' : 'NON-') + rand;
+  document.getElementById('code').textContent = code;
+  document.getElementById('done').classList.add('show');
+}
+
+// init
+renderTokens();
+addMsg('bot', WELCOME[cond]);
+hist.push({ role: 'assistant', content: WELCOME[cond] });
+</script>
+</body>
+</html>
