@@ -42,4 +42,201 @@ body {
   max-width: 82%; padding: 9px 13px; border-radius: 14px;
   font-size: 13px; line-height: 1.65; word-break: keep-all;
 }
-.bubble.user { background: #ECE6DF; color: #222;
+.bubble.user { background: #ECE6DF; color: #222; border-bottom-right-radius: 4px; }
+.bubble.bot { background: #EAF1ED; color: #1f3a30; border-bottom-left-radius: 4px; }
+.bubble.typing { opacity: 0.5; }
+.chat-input-row {
+  display: flex; gap: 8px; padding: 12px 14px; background: #fff;
+  border-top: 1px solid #f0f0f0; border-radius: 0 0 16px 16px;
+}
+.chat-input {
+  flex: 1; border: 1px solid #e0e0e0; border-radius: 20px;
+  padding: 9px 14px; font-size: 13px; font-family: inherit;
+  outline: none; background: #fafafa;
+}
+.chat-input:focus { border-color: #aaa; background: #fff; }
+.send-btn {
+  padding: 9px 18px; border-radius: 20px; border: none;
+  font-size: 13px; font-family: inherit; font-weight: 600;
+  cursor: pointer; background: #6B8E7F; color: #fff;
+}
+.send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.done-box {
+  margin-top: 16px; padding: 20px; background: #fff;
+  border-radius: 16px; text-align: center; display: none;
+}
+.done-box.show { display: block; }
+.done-box h3 { font-size: 15px; color: #333; margin-bottom: 10px; }
+.done-box p { font-size: 13px; color: #666; margin-bottom: 14px; line-height: 1.6; }
+.code {
+  font-size: 22px; font-weight: 700; letter-spacing: 2px;
+  color: #6B8E7F; background: #EAF1ED; padding: 12px;
+  border-radius: 10px; margin-bottom: 6px;
+}
+.err { color: #c0392b; font-size: 12px; text-align: center; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="token-bar">
+    <span class="token-label">남은 메시지</span>
+    <div class="token-dots" id="tokens"></div>
+  </div>
+  <div class="chat-header">
+    <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+    <span class="chat-title">챗봇</span>
+  </div>
+  <div class="chat-body" id="cbody"></div>
+  <div class="chat-input-row">
+    <input class="chat-input" id="inp" type="text" placeholder="메시지를 입력하세요..."
+      onkeydown="if(event.key==='Enter'&&!event.isComposing)window.send()" />
+    <button class="send-btn" id="sbtn" onclick="window.send()">전송</button>
+  </div>
+  <div class="err" id="err"></div>
+
+  <div class="done-box" id="done">
+    <h3>대화가 종료되었습니다</h3>
+    <p>아래 완료 코드를 설문에 입력해 주세요.</p>
+    <div class="code" id="code">—</div>
+  </div>
+</div>
+
+<script>
+const params = new URLSearchParams(window.location.search);
+const cond = params.get('c') === 'n' ? 'n' : 'm';
+
+const TOTAL_TOKENS = 12;
+let tokensLeft = TOTAL_TOKENS;
+let hist = [];
+let loading = false;
+
+const PROMPTS = {
+  m: `너는 정서적 지지를 해주는 한국어 챗봇이야. 가장 중요한 규칙은 하나야: 사용자가 쓴 종결어미를 그대로 따라 써.
+
+아래 예시를 보고 패턴을 익혀:
+
+사용자: "힘들당 ㅠㅠ" → 너: "진짜 힘들당 ㅠㅠ 무슨 일 있었당?"
+사용자: "너무 힘들엉..." → 너: "많이 힘들엉 ㅠ 얘기해줘도 돼엉"
+사용자: "좋아용 ㅎㅎ" → 너: "다행이당 ㅎㅎ 뭐가 좋아졌용?"
+사용자: "모르겠어" → 너: "그럴 수 있어. 뭐가 제일 걸려?"
+사용자: "힘들어요 ㅠ" → 너: "많이 힘드셨어요 ㅠ 어떤 일이에요?"
+사용자: "진짜 모르겠다" → 너: "진짜 답답하겠다. 나한테 얘기해봐"
+사용자: "너무 지쳐요" → 너: "진짜 많이 지치셨겠어요. 요즘 어떤 게 힘드세요?"
+사용자: "힘드네요 ㅠ" → 너: "진짜 힘드네요 ㅠ 무슨 일이에요?"
+
+핵심: 사용자 종결어미 = 네 종결어미. 사용자 어휘("넘","진짜","완전") 그대로 써. 응답은 2~3문장.`,
+
+  n: `당신은 정서적 지지를 제공하는 한국어 챗봇입니다.
+
+[절대 규칙: 격식체만 사용]
+- 항상 "~합니다/~입니다/~하십니까/~주시겠습니까"만 사용. 사용자 말투와 무관하게 유지.
+- "진짜/너무/완전/넘" 같은 구어체 절대 금지. "매우/상당히/다소" 사용.
+- ㅠㅠ/ㅋㅋ/ㅎㅎ/이모지 절대 금지.
+- "~해요/~어요/~죠/~야/~해/~당/~엉/~양" 사용 절대 금지.
+- 응답은 2~3문장. 공감과 경청 중심.`
+};
+
+const WELCOME = {
+  m: '안녕! 요즘 어떻게 지내고 있어? 편하게 얘기해줘 :)',
+  n: '안녕하십니까. 최근 어떻게 지내고 계신지 말씀해 주시겠습니까?'
+};
+
+function renderTokens() {
+  const c = document.getElementById('tokens');
+  c.innerHTML = '';
+  for (let i = 0; i < TOTAL_TOKENS; i++) {
+    const d = document.createElement('div');
+    d.className = 'tok' + (i < tokensLeft ? ' on' : '');
+    c.appendChild(d);
+  }
+}
+
+function addMsg(role, text) {
+  const body = document.getElementById('cbody');
+  const row = document.createElement('div');
+  row.className = 'mrow ' + role;
+  const spk = document.createElement('span');
+  spk.className = 'spk';
+  spk.textContent = role === 'user' ? '나' : '챗봇';
+  const b = document.createElement('div');
+  b.className = 'bubble ' + (role === 'user' ? 'user' : 'bot');
+  b.textContent = text;
+  row.appendChild(spk); row.appendChild(b);
+  body.appendChild(row);
+  body.scrollTop = body.scrollHeight;
+}
+
+window.send = async function() {
+  if (loading || tokensLeft <= 0) return;
+  const inp = document.getElementById('inp');
+  const text = inp.value.trim();
+  if (!text) return;
+
+  loading = true;
+  inp.value = '';
+  document.getElementById('sbtn').disabled = true;
+  document.getElementById('err').textContent = '';
+
+  addMsg('user', text);
+  hist.push({ role: 'user', content: text });
+
+  tokensLeft--;
+  renderTokens();
+
+  const body = document.getElementById('cbody');
+  const tr = document.createElement('div');
+  tr.className = 'mrow bot'; tr.id = 'typing';
+  const ts = document.createElement('span'); ts.className = 'spk'; ts.textContent = '챗봇';
+  const tb = document.createElement('div'); tb.className = 'bubble bot typing'; tb.textContent = '...';
+  tr.appendChild(ts); tr.appendChild(tb);
+  body.appendChild(tr); body.scrollTop = body.scrollHeight;
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ system: PROMPTS[cond], messages: hist })
+    });
+    const data = await res.json();
+    document.getElementById('typing')?.remove();
+
+    if (data.reply) {
+      hist.push({ role: 'assistant', content: data.reply });
+      addMsg('bot', data.reply);
+    } else {
+      document.getElementById('err').textContent = '응답 오류가 발생했습니다. 다시 시도해 주세요.';
+      tokensLeft++; renderTokens();
+    }
+  } catch (e) {
+    document.getElementById('typing')?.remove();
+    document.getElementById('err').textContent = '네트워크 오류가 발생했습니다.';
+    tokensLeft++; renderTokens();
+  }
+
+  loading = false;
+
+  if (tokensLeft <= 0) {
+    endConversation();
+  } else {
+    document.getElementById('sbtn').disabled = false;
+    inp.focus();
+  }
+}
+
+function endConversation() {
+  document.getElementById('inp').disabled = true;
+  document.getElementById('sbtn').disabled = true;
+  document.getElementById('inp').placeholder = '대화가 종료되었습니다';
+
+  const rand = Math.random().toString(36).substring(2, 8).toUpperCase();
+  const code = (cond === 'm' ? 'MIR-' : 'NON-') + rand;
+  document.getElementById('code').textContent = code;
+  document.getElementById('done').classList.add('show');
+}
+
+renderTokens();
+addMsg('bot', WELCOME[cond]);
+hist.push({ role: 'assistant', content: WELCOME[cond] });
+</script>
+</body>
+</html>
