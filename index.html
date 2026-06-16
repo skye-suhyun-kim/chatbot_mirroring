@@ -102,9 +102,8 @@ body {
 </div>
 
 <script>
-// ── 조건 배정: URL 파라미터 ?c=m (미러링) 또는 ?c=n (비미러링) ──
 const params = new URLSearchParams(window.location.search);
-const cond = params.get('c') === 'n' ? 'n' : 'm';  // 기본값 미러링
+const cond = params.get('c') === 'n' ? 'n' : 'm';
 
 const TOTAL_TOKENS = 12;
 let tokensLeft = TOTAL_TOKENS;
@@ -112,28 +111,31 @@ let hist = [];
 let loading = false;
 
 const PROMPTS = {
-  m: `당신은 정서적 지지를 제공하는 한국어 챗봇입니다. 반드시 아래 미러링 규칙을 따르세요.
+  m: `당신은 정서적 지지를 제공하는 한국어 챗봇입니다.
 
-[미러링 필수 규칙 - 절대 어기지 말 것]
-1. 종결어미: 사용자가 "~해요/~어요/~죠" 쓰면 당신도 반드시 그 어미 사용. 반말("~해/~야/~당") 쓰면 반드시 반말로 응답.
-2. 어휘: 사용자가 쓴 단어("진짜","너무","완전","넘" 등)를 그대로 사용. 격식체 어휘("매우","상당히") 금지.
-3. 감탄사: 사용자가 ㅠㅠ,ㅋㅋ,ㅎㅎ 쓰면 유사한 표현 반드시 포함.
-4. 절대 금지: "합니다/입니다/십니까/주시겠습니까" 등 격식체 종결어미 사용 금지.
+[최우선 규칙: 종결어미 미러링 - 절대 어기지 말 것]
+- 응답 전 반드시 사용자의 마지막 메시지 종결어미를 확인하고 동일하게 사용할 것.
+- "~엉/~양/~당/~용" → 반드시 "~엉/~양/~당/~용"으로 응답
+- "~해/~야/~어/~지" (반말) → 반드시 반말로 응답
+- "~해요/~어요/~죠" → 반드시 "~해요/~어요/~죠"로 응답
+- "~합니다/~입니다" → 반드시 격식체로 응답
+- 사용자가 쓴 구어체 어휘("넘","진짜","완전","개") 그대로 사용. "매우/상당히" 금지.
+- 사용자가 ㅠㅠ/ㅋㅋ/ㅎㅎ 사용 시 유사 표현 반드시 포함.
+- 격식체("합니다/입니다/하십니까") 절대 사용 금지 (사용자가 격식체 쓸 때 제외).
+- 응답은 2~3문장. 공감과 경청 중심.`,
 
-응답은 2~3문장으로 짧게. 공감과 경청 중심.`,
-  n: `당신은 정서적 지지를 제공하는 한국어 챗봇입니다. 반드시 아래 격식체 규칙을 따르세요.
+  n: `당신은 정서적 지지를 제공하는 한국어 챗봇입니다.
 
-[격식체 필수 규칙 - 절대 어기지 말 것]
-1. 종결어미: 항상 "~합니다/~입니다/~하십니까/~주시겠습니까"만 사용. 사용자 말투와 무관하게 유지.
-2. 어휘: "진짜/너무/완전/넘" 같은 구어체 절대 금지. "매우/상당히/다소" 사용.
-3. 감탄사 절대 금지: ㅠㅠ,ㅋㅋ,ㅎㅎ,이모지 금지.
-4. 절대 금지: "~해요/~어요/~죠/~야/~해/~당" 같은 비격식체 사용 금지.
-
-응답은 2~3문장으로 짧게. 공감과 경청 중심.`
+[최우선 규칙: 격식체 유지 - 절대 어기지 말 것]
+- 항상 "~합니다/~입니다/~하십니까/~주시겠습니까"만 사용. 사용자 말투와 무관하게 유지.
+- "진짜/너무/완전/넘/개" 같은 구어체 절대 금지. "매우/상당히/다소" 사용.
+- ㅠㅠ/ㅋㅋ/ㅎㅎ/이모지 절대 금지.
+- "~해요/~어요/~죠/~야/~해/~당/~엉/~양" 사용 절대 금지.
+- 응답은 2~3문장. 공감과 경청 중심.`
 };
 
 const WELCOME = {
-  m: '안녕하세요! 요즘 어떻게 지내고 계세요? 편하게 이야기 나눠봐요 :)',
+  m: '안녕! 요즘 어떻게 지내고 있어? 편하게 얘기해줘 :)',
   n: '안녕하십니까. 최근 어떻게 지내고 계신지 말씀해 주시겠습니까?'
 };
 
@@ -176,11 +178,9 @@ async function send() {
   addMsg('user', text);
   hist.push({ role: 'user', content: text });
 
-  // 토큰 차감
   tokensLeft--;
   renderTokens();
 
-  // typing
   const body = document.getElementById('cbody');
   const tr = document.createElement('div');
   tr.className = 'mrow bot'; tr.id = 'typing';
@@ -203,7 +203,7 @@ async function send() {
       addMsg('bot', data.reply);
     } else {
       document.getElementById('err').textContent = '응답 오류가 발생했습니다. 다시 시도해 주세요.';
-      tokensLeft++; renderTokens();  // 실패 시 토큰 복구
+      tokensLeft++; renderTokens();
     }
   } catch (e) {
     document.getElementById('typing')?.remove();
@@ -213,7 +213,6 @@ async function send() {
 
   loading = false;
 
-  // 토큰 소진 → 종료
   if (tokensLeft <= 0) {
     endConversation();
   } else {
@@ -227,14 +226,12 @@ function endConversation() {
   document.getElementById('sbtn').disabled = true;
   document.getElementById('inp').placeholder = '대화가 종료되었습니다';
 
-  // completion code 생성: 조건 + 랜덤
   const rand = Math.random().toString(36).substring(2, 8).toUpperCase();
   const code = (cond === 'm' ? 'MIR-' : 'NON-') + rand;
   document.getElementById('code').textContent = code;
   document.getElementById('done').classList.add('show');
 }
 
-// init
 renderTokens();
 addMsg('bot', WELCOME[cond]);
 hist.push({ role: 'assistant', content: WELCOME[cond] });
