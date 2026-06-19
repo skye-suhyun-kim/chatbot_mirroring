@@ -115,7 +115,9 @@ const PROMPTS = {
 
 [말투 미러링 규칙]
 - 매 응답마다 아래에 [이번 응답 말투] 지시가 주어져. 반드시 그 말투로 답해.
-- 사용자가 쓴 단어("넘","진짜","완전" 등)나 감탄사(ㅠㅠ,ㅋㅋ,ㅎㅎ)가 있으면 자연스러운 선에서 1~2개만 함께 써.
+- 감탄사(ㅠㅠ,ㅜㅜ,ㅋㅋ,ㅎㅎ)는 사용자가 그 메시지에서 직접 쓴 경우에만 사용해. 사용자가 안 썼으면 너도 절대 쓰지 마.
+- 마찬가지로 이모티콘이나 특수문자도 사용자가 안 쓰면 쓰지 마.
+- 사용자가 쓴 단어("넘","진짜","완전" 등)는 자연스러우면 활용해도 돼.
 - 사용자 문장을 그대로 복사하지 말고, 매번 새로운 표현으로 공감해.
 - 응답은 2~3문장. 공감과 경청 중심. 질문은 하나만.`,
   n: `당신은 정서적 지지를 제공하는 한국어 챗봇입니다.
@@ -141,36 +143,47 @@ function detectStyle(text) {
   return '반말(~어/~아/~지/~야체)로 답해.';
 }
 
-// ── 받침 합성: 사용자가 쓴 끝글자 받침(ㅇ/ㅁ)을 챗봇 응답 끝글자에 얹기 ──
-function applyJongseong(botText, userText) {
-  // 사용자 마지막 한글 글자
+// ── 사용자 마지막 한글 글자의 받침 인덱스 추출 (ㅇ=21, ㅁ=16만 반환, 그 외 0) ──
+function getUserFinal(userText) {
   const userHangul = userText.match(/[가-힣]/g);
-  if (!userHangul) return botText;
-  const lastUserChar = userHangul[userHangul.length - 1];
-  const userFinalIdx = (lastUserChar.charCodeAt(0) - 0xAC00) % 28;
+  if (!userHangul) return 0;
+  const lastChar = userHangul[userHangul.length - 1];
+  const idx = (lastChar.charCodeAt(0) - 0xAC00) % 28;
+  if (idx === 21 || idx === 16) return idx;  // ㅇ 또는 ㅁ만
+  return 0;
+}
 
-  // 받침 없으면 그대로
-  if (userFinalIdx === 0) return botText;
+// ── 한 글자에 받침 합성 (받침 없는 글자에만) ──
+function addFinalToChar(ch, finalIdx) {
+  if (!/[가-힣]/.test(ch)) return ch;
+  const curFinal = (ch.charCodeAt(0) - 0xAC00) % 28;
+  if (curFinal !== 0) return ch;  // 이미 받침 있으면 안 건드림
+  return String.fromCharCode(ch.charCodeAt(0) + finalIdx);
+}
 
-  // ㅇ(21) 또는 ㅁ(16) 받침만 적용
-  if (userFinalIdx !== 21 && userFinalIdx !== 16) return botText;
+// ── 모든 문장 끝글자에 받침 적용 ──
+function applyJongseong(botText, userText) {
+  const finalIdx = getUserFinal(userText);
+  if (finalIdx === 0) return botText;  // 사용자가 ㅇ/ㅁ 받침 안 썼으면 그대로
 
-  // 챗봇 응답에서 마지막 한글 글자 위치
-  let lastIdx = -1;
-  for (let i = botText.length - 1; i >= 0; i--) {
-    if (/[가-힣]/.test(botText[i])) { lastIdx = i; break; }
+  // 문장 단위로 분리 (. ? ! 기준, 구분자 유지)
+  const parts = botText.split(/([.?!]+)/);
+  let result = '';
+  for (let i = 0; i < parts.length; i++) {
+    const seg = parts[i];
+    // 구분자 토큰은 그대로
+    if (/^[.?!]+$/.test(seg)) { result += seg; continue; }
+    if (seg.trim() === '') { result += seg; continue; }
+
+    // 이 세그먼트의 마지막 한글 글자 찾아서 받침 적용
+    let lastIdx = -1;
+    for (let j = seg.length - 1; j >= 0; j--) {
+      if (/[가-힣]/.test(seg[j])) { lastIdx = j; break; }
+    }
+    if (lastIdx === -1) { result += seg; continue; }
+    result += seg.slice(0, lastIdx) + addFinalToChar(seg[lastIdx], finalIdx) + seg.slice(lastIdx + 1);
   }
-  if (lastIdx === -1) return botText;
-
-  const botChar = botText[lastIdx];
-  const botFinalIdx = (botChar.charCodeAt(0) - 0xAC00) % 28;
-
-  // 챗봇 끝글자에 이미 받침 있으면 안 건드림 (비문 방지)
-  if (botFinalIdx !== 0) return botText;
-
-  // 받침 합성
-  const newChar = String.fromCharCode(botChar.charCodeAt(0) + userFinalIdx);
-  return botText.slice(0, lastIdx) + newChar + botText.slice(lastIdx + 1);
+  return result;
 }
 
 function renderTokens() {
@@ -240,7 +253,6 @@ window.send = async function() {
 
     if (data.reply) {
       let reply = data.reply;
-      // 미러링 조건에서만 받침 합성 후처리
       if (cond === 'm') {
         reply = applyJongseong(reply, text);
       }
