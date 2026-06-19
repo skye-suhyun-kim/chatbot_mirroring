@@ -157,7 +157,7 @@ function addMsg(role, text) {
   row.className = 'mrow ' + role;
   const spk = document.createElement('span');
   spk.className = 'spk';
-  spk.textContent = role === 'user' ? '나' : '챗봇';
+  spk.textContent = role === 'user' ? '나' : 'GOBOT';
   const b = document.createElement('div');
   b.className = 'bubble ' + (role === 'user' ? 'user' : 'bot');
   b.textContent = text;
