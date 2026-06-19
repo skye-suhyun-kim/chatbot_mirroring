@@ -233,6 +233,18 @@ function endConversation() {
   const code = (cond === 'm' ? 'MIR-' : 'NON-') + rand;
   document.getElementById('code').textContent = code;
   document.getElementById('done').classList.add('show');
+
+  // 구글시트 로깅
+  fetch('https://script.google.com/macros/s/AKfycbzJgYYH8HoKqUDD0i3BkQgGnyxmgY9SdxsMH4lPYJcNVIcFJzwYGZulgyhL818C5P-r/exec', {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: { 'Content-Type': 'text/plain' },
+    body: JSON.stringify({
+      condition: cond,
+      completionCode: code,
+      history: hist
+    })
+  }).catch(err => console.error('로깅 실패:', err));
 }
 
 renderTokens();
