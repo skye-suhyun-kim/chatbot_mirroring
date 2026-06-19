@@ -117,7 +117,6 @@ const PROMPTS = {
 - 매 응답마다 아래에 [이번 응답 말투] 지시가 주어져. 반드시 그 말투로 답해.
 - 사용자가 쓴 단어("넘","진짜","완전" 등)나 감탄사(ㅠㅠ,ㅋㅋ,ㅎㅎ)가 있으면 자연스러운 선에서 1~2개만 함께 써.
 - 사용자 문장을 그대로 복사하지 말고, 매번 새로운 표현으로 공감해.
-- 말끝 변형(~엉/~앙/~용/~당 등)은 한 응답에 딱 1번, 마지막 문장 끝에만 자연스러운 경우에 한해 써. 문법적으로 어색하면 표준 반말로 둬.
 - 응답은 2~3문장. 공감과 경청 중심. 질문은 하나만.`,
   n: `당신은 정서적 지지를 제공하는 한국어 챗봇입니다.
 
@@ -134,19 +133,44 @@ const WELCOME = {
   n: '안녕하세요 저는 여러분의 고민을 들어주는 챗봇 GOBOT입니다. 요즘 고민되는 일들을 저에게 편하게 말씀해주세요.'
 };
 
-// ── 사용자 말투 자동 감지 ──
+// ── 사용자 말투 자동 감지 (반말/존댓말) ──
 function detectStyle(text) {
-  // 존댓말
-  if (/(요|죠|네요|어요|아요|에요|예요)[.?!~\s]*$|니다[.?!~\s]*$|세요|십니까|십니다/.test(text)) {
-    return '존댓말(~요/~습니다체)로 답해.';
+  if (/(요|죠|네요|어요|아요|에요|예요)[.?!~\s]*$|니다[.?!~\s]*$|세요|십니까/.test(text)) {
+    return '존댓말(~요/~습니다체)로 자연스럽게 답해.';
   }
-  // 말끝 애교 변형 (싫엉, 좋앙, 그랭, ~용, ~당 등)
-  const m = text.match(/[가-힣]([엉앙잉융용당랑징])[\s.?!~ㅠㅜㅎㅋ]*$/);
-  if (m) {
-    return `반말로 답하되, 마지막 문장 끝에만 사용자가 쓴 "${m[1]}" 같은 말끝 변형을 자연스러우면 1번만 써.`;
-  }
-  // 기본 반말
   return '반말(~어/~아/~지/~야체)로 답해.';
+}
+
+// ── 받침 합성: 사용자가 쓴 끝글자 받침(ㅇ/ㅁ)을 챗봇 응답 끝글자에 얹기 ──
+function applyJongseong(botText, userText) {
+  // 사용자 마지막 한글 글자
+  const userHangul = userText.match(/[가-힣]/g);
+  if (!userHangul) return botText;
+  const lastUserChar = userHangul[userHangul.length - 1];
+  const userFinalIdx = (lastUserChar.charCodeAt(0) - 0xAC00) % 28;
+
+  // 받침 없으면 그대로
+  if (userFinalIdx === 0) return botText;
+
+  // ㅇ(21) 또는 ㅁ(16) 받침만 적용
+  if (userFinalIdx !== 21 && userFinalIdx !== 16) return botText;
+
+  // 챗봇 응답에서 마지막 한글 글자 위치
+  let lastIdx = -1;
+  for (let i = botText.length - 1; i >= 0; i--) {
+    if (/[가-힣]/.test(botText[i])) { lastIdx = i; break; }
+  }
+  if (lastIdx === -1) return botText;
+
+  const botChar = botText[lastIdx];
+  const botFinalIdx = (botChar.charCodeAt(0) - 0xAC00) % 28;
+
+  // 챗봇 끝글자에 이미 받침 있으면 안 건드림 (비문 방지)
+  if (botFinalIdx !== 0) return botText;
+
+  // 받침 합성
+  const newChar = String.fromCharCode(botChar.charCodeAt(0) + userFinalIdx);
+  return botText.slice(0, lastIdx) + newChar + botText.slice(lastIdx + 1);
 }
 
 function renderTokens() {
@@ -215,8 +239,13 @@ window.send = async function() {
     document.getElementById('typing')?.remove();
 
     if (data.reply) {
-      hist.push({ role: 'assistant', content: data.reply });
-      addMsg('bot', data.reply);
+      let reply = data.reply;
+      // 미러링 조건에서만 받침 합성 후처리
+      if (cond === 'm') {
+        reply = applyJongseong(reply, text);
+      }
+      hist.push({ role: 'assistant', content: reply });
+      addMsg('bot', reply);
     } else {
       document.getElementById('err').textContent = '응답 오류가 발생했습니다. 다시 시도해 주세요.';
       tokensLeft++; renderTokens();
