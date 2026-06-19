@@ -15,7 +15,7 @@ body {
   align-items: center;
   padding: 24px 16px;
 }
-.wrap { width: 100%; max-width: 500px; }
+.wrap { width: 100%; max-width: 680px; }
 .token-bar {
   display: flex; align-items: center; gap: 8px;
   margin-bottom: 12px; padding: 0 4px;
@@ -229,8 +229,7 @@ function endConversation() {
   document.getElementById('sbtn').disabled = true;
   document.getElementById('inp').placeholder = '대화가 종료되었습니다';
 
-  const rand = Math.random().toString(36).substring(2, 8).toUpperCase();
-  const code = (cond === 'm' ? 'MIR-' : 'NON-') + rand;
+  const code = '524617';
   document.getElementById('code').textContent = code;
   document.getElementById('done').classList.add('show');
 
